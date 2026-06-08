@@ -634,7 +634,7 @@ function FleetApp({ session }) {
             </div>
           ))}
         </div>
-        <input ref={photoInputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => handlePhotoCapture(e, activeVehicle.id, photoAngle)} />
+        <input ref={photoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handlePhotoCapture(e, activeVehicle.id, photoAngle)} />
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "14px 16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
             <span style={{ color: "var(--muted)" }}>Fotos registradas</span>
@@ -788,7 +788,7 @@ function FleetApp({ session }) {
                 <div className={`receipt-upload ${receiptPreview ? "has-image" : ""}`} onClick={() => receiptInputRef.current && receiptInputRef.current.click()}>
                   {receiptPreview ? <><img src={receiptPreview} alt="NF" className="receipt-preview" /><button className="receipt-remove" onClick={e => { e.stopPropagation(); setReceiptFile(null); setReceiptPreview(null) }}>✕</button></> : <><span className="ru-icon">🧾</span><span className="ru-label">Tire foto da nota fiscal<br/>ou selecione da galeria</span><span className="ru-sub">Opcional · JPG, PNG</span></>}
                 </div>
-                <input ref={receiptInputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleReceiptSelect} />
+                <input ref={receiptInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleReceiptSelect} />
               </div>
               <button className="btn-primary" disabled={saving || !formData.title} onClick={saveRecord}>{saving ? "Salvando…" : editRecord ? "Salvar alterações" : "Salvar Registro"}</button>
               <button className="btn-secondary" onClick={() => { setModal(null); setEditRecord(null); setReceiptPreview(null); setReceiptFile(null) }}>Cancelar</button>
