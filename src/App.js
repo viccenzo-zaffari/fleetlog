@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react"
 import { supabase, isConfigured } from "./supabaseClient"
 import AuthScreen from "./AuthScreen"
-import { fetchVehicles, insertVehicle, updateVehicle, fetchRecords, insertRecord, uploadPhoto, uploadReceipt, createTransfer } from "./db"
+import { fetchVehicles, insertVehicle, updateVehicle, fetchRecords, insertRecord, updateRecord, uploadPhoto, uploadReceipt, createTransfer } from "./db"
 
 const FONTS = `@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap');`
 
@@ -315,6 +315,7 @@ function FleetApp({ session }) {
   const [formData, setFormData]     = useState({})
   const [vehicleType, setVehicleType] = useState("car")
   const [viewRecord, setViewRecord] = useState(null)
+  const [editRecord, setEditRecord]   = useState(null)
   const [receiptFile, setReceiptFile] = useState(null)
   const [receiptPreview, setReceiptPreview] = useState(null)
   const [saving, setSaving]         = useState(false)
@@ -379,38 +380,71 @@ function FleetApp({ session }) {
     } catch { showToast("Erro ao salvar veículo") } finally { setSaving(false) }
   }
 
-  const addRecord = async () => {
+  const saveRecord = async () => {
     if (!formData.title || !activeVehicle) return
     setSaving(true)
     try {
-      let receiptUrl = null
-      if (receiptFile) receiptUrl = await uploadReceipt(user.id, activeVehicle.id, receiptFile)
+      // Upload receipt if new file selected
+      let receiptUrl = editRecord ? editRecord.receipt_url : null
+      if (receiptFile) {
+        receiptUrl = await uploadReceipt(user.id, activeVehicle.id, receiptFile)
+      }
+
       const payload = {
-        type: recordType, title: formData.title,
+        type: recordType,
+        title: formData.title,
         date: formData.date || new Date().toISOString().slice(0, 10),
         km: parseInt(formData.km) || activeVehicle.km,
         cost: parseFloat(formData.cost) || 0,
-        notes: formData.notes || "", parts: formData.parts || "",
+        notes: formData.notes || "",
+        parts: formData.parts || "",
         receipt_url: receiptUrl,
       }
-      const created = await insertRecord(activeVehicle.id, payload)
-      setRecords(r => ({ ...r, [activeVehicle.id]: [created, ...(r[activeVehicle.id] || [])] }))
-      setFormData({}); setReceiptFile(null); setReceiptPreview(null)
-      setModal(null); showToast("Registro adicionado ✓")
-    } catch { showToast("Erro ao salvar registro") } finally { setSaving(false) }
+
+      if (editRecord) {
+        // EDITING existing record
+        const updated = await updateRecord(editRecord.id, payload)
+        setRecords(r => ({
+          ...r,
+          [activeVehicle.id]: (r[activeVehicle.id] || []).map(rec => rec.id === updated.id ? updated : rec)
+        }))
+        setEditRecord(null)
+        showToast("Registro atualizado ✓")
+      } else {
+        // NEW record
+        const created = await insertRecord(activeVehicle.id, payload)
+        setRecords(r => ({ ...r, [activeVehicle.id]: [created, ...(r[activeVehicle.id] || [])] }))
+        showToast("Registro adicionado ✓")
+      }
+
+      setFormData({}); setReceiptFile(null); setReceiptPreview(null); setModal(null)
+    } catch (e) {
+      console.error(e)
+      showToast("Erro ao salvar registro")
+    } finally { setSaving(false) }
   }
 
   const handlePhotoCapture = async (e, vehicleId, angle) => {
     const file = e.target.files[0]; if (!file) return
     const preview = URL.createObjectURL(file)
+    // Optimistic update with preview
     setVehicles(p => p.map(v => v.id === vehicleId ? { ...v, photos: { ...(v.photos || {}), [angle]: preview } } : v))
     try {
       const url = await uploadPhoto(user.id, vehicleId, angle, file)
-      const newPhotos = { ...(activeVehicle?.photos || {}), [angle]: url }
-      const updated = await updateVehicle(vehicleId, { photos: newPhotos })
-      setVehicles(p => p.map(v => v.id === updated.id ? updated : v))
+      // Get fresh vehicle photos from current state to avoid stale closure
+      setVehicles(prev => {
+        const freshVehicle = prev.find(v => v.id === vehicleId)
+        const newPhotos = { ...(freshVehicle?.photos || {}), [angle]: url }
+        updateVehicle(vehicleId, { photos: newPhotos })
+          .then(updated => setVehicles(p => p.map(v => v.id === updated.id ? updated : v)))
+          .catch(() => {})
+        return prev
+      })
       showToast("Foto salva ✓")
-    } catch { showToast("Erro ao enviar foto") }
+    } catch (e) {
+      console.error(e)
+      showToast("Erro ao enviar foto: " + e.message)
+    }
   }
 
   const handleTransfer = async () => {
@@ -540,7 +574,7 @@ function FleetApp({ session }) {
         </div>
         <div className="quick-actions">
           {[{ type: "oil", icon: "🛢️", label: "Óleo", sub: "Troca de óleo" }, { type: "maintenance", icon: "⚙️", label: "Revisão", sub: "Manutenção geral" }, { type: "tire", icon: "🔧", label: "Pneu/Roda", sub: "Alinhamento, etc" }, { type: "fuel", icon: "⛽", label: "Abastec.", sub: "Combustível" }].map(a => (
-            <button key={a.type} className="quick-btn" onClick={() => { setFormData({}); setReceiptFile(null); setReceiptPreview(null); setRecordType(a.type); setModal("addRecord") }}>
+            <button key={a.type} className="quick-btn" onClick={() => { setFormData({}); setEditRecord(null); setReceiptFile(null); setReceiptPreview(null); setRecordType(a.type); setModal("addRecord") }}>
               <span className="qb-icon">{a.icon}</span><span className="qb-label">{a.label}</span><span className="qb-sub">{a.sub}</span>
             </button>
           ))}
@@ -553,7 +587,7 @@ function FleetApp({ session }) {
         </div>
         <div className="section-header" style={{ marginTop: 8 }}>
           <span className="section-title">Histórico</span>
-          <span className="section-action" onClick={() => { setFormData({}); setReceiptFile(null); setReceiptPreview(null); setModal("addRecord") }}>+ Novo</span>
+          <span className="section-action" onClick={() => { setFormData({}); setEditRecord(null); setReceiptFile(null); setReceiptPreview(null); setModal("addRecord") }}>+ Novo</span>
         </div>
         <div className="timeline">
           {activeRecords.map(rec => {
@@ -569,6 +603,7 @@ function FleetApp({ session }) {
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                   {rec.cost > 0 && <div className="timeline-cost">R${(rec.cost).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>}
                   {rec.receipt_url && <img src={rec.receipt_url} alt="NF" className="receipt-thumb" />}
+                  <button onClick={e => { e.stopPropagation(); setEditRecord(rec); setRecordType(rec.type); setFormData({ title: rec.title, date: rec.date, km: rec.km, cost: rec.cost, notes: rec.notes, parts: rec.parts }); setReceiptPreview(rec.receipt_url || null); setReceiptFile(null); setModal("addRecord") }} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "3px 8px", fontSize: 10, color: "var(--muted)", cursor: "pointer", marginTop: 2 }}>✏️ editar</button>
                 </div>
               </div>
             )
@@ -731,7 +766,7 @@ function FleetApp({ session }) {
           <div className="overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
             <div className="sheet">
               <div className="sheet-handle" />
-              <div className="sheet-title serif">Novo Registro</div>
+              <div className="sheet-title serif">{editRecord ? "Editar Registro" : "Novo Registro"}</div>
               <div className="form-group"><label className="form-label">Tipo</label><div className="chips">{Object.entries(TYPE_CONFIG).map(([k, v]) => (<div key={k} className={`chip ${recordType === k ? "selected" : ""}`} onClick={() => setRecordType(k)}>{v.emoji} {v.label}</div>))}</div></div>
               <div className="form-group"><label className="form-label">Descrição *</label><input className="form-input" placeholder="Ex: Troca de óleo + filtro" value={formData.title || ""} onChange={e => setFormData(p => ({ ...p, title: e.target.value }))} /></div>
               <div className="form-row">
@@ -748,8 +783,8 @@ function FleetApp({ session }) {
                 </div>
                 <input ref={receiptInputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleReceiptSelect} />
               </div>
-              <button className="btn-primary" disabled={saving || !formData.title} onClick={addRecord}>{saving ? "Salvando…" : "Salvar Registro"}</button>
-              <button className="btn-secondary" onClick={() => setModal(null)}>Cancelar</button>
+              <button className="btn-primary" disabled={saving || !formData.title} onClick={saveRecord}>{saving ? "Salvando…" : editRecord ? "Salvar alterações" : "Salvar Registro"}</button>
+              <button className="btn-secondary" onClick={() => { setModal(null); setEditRecord(null); setReceiptPreview(null); setReceiptFile(null) }}>Cancelar</button>
             </div>
           </div>
         )}
@@ -802,7 +837,10 @@ function FleetApp({ session }) {
               {[{ label: "Data", val: viewRecord.date }, { label: "KM no momento", val: `${(viewRecord.km||0).toLocaleString("pt-BR")} km` }, { label: "Custo", val: viewRecord.cost > 0 ? `R$ ${viewRecord.cost.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—" }, { label: "Peças trocadas", val: viewRecord.parts || "—" }, { label: "Observações", val: viewRecord.notes || "—" }, { label: "Nota fiscal", val: viewRecord.receipt_url ? "✓ Anexada" : "Não anexada" }].map(r => (
                 <div className="detail-row" key={r.label}><span>{r.label}</span><span style={{ color: r.label === "Nota fiscal" && viewRecord.receipt_url ? "var(--accent)" : undefined }}>{r.val}</span></div>
               ))}
-              <button className="btn-secondary" style={{ marginTop: 16 }} onClick={() => setViewRecord(null)}>Fechar</button>
+              <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                <button className="btn-secondary" style={{ margin: 0 }} onClick={() => setViewRecord(null)}>Fechar</button>
+                <button className="btn-primary" style={{ margin: 0 }} onClick={() => { setEditRecord(viewRecord); setRecordType(viewRecord.type); setFormData({ title: viewRecord.title, date: viewRecord.date, km: viewRecord.km, cost: viewRecord.cost, notes: viewRecord.notes, parts: viewRecord.parts }); setReceiptPreview(viewRecord.receipt_url || null); setReceiptFile(null); setViewRecord(null); setModal("addRecord") }}>✏️ Editar</button>
+              </div>
             </div>
           </div>
         )}

@@ -102,3 +102,14 @@ export async function claimTransfer(token, newUserId) {
   await supabase.from('transfers').update({ status: 'claimed' }).eq('id', transfer.id)
   return transfer.vehicle_id
 }
+
+export async function updateRecord(id, fields) {
+  const { data, error } = await supabase
+    .from('records')
+    .update(fields)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
