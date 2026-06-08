@@ -334,7 +334,16 @@ function FleetApp({ session }) {
 
   useEffect(() => {
     fetchVehicles(user.id)
-      .then(data => { setVehicles(data || []); setLoading(false) })
+      .then(async data => {
+        setVehicles(data || [])
+        setLoading(false)
+        // Load records for ALL vehicles so home counter works
+        const allRecords = {}
+        await Promise.all((data || []).map(v =>
+          fetchRecords(v.id).then(recs => { allRecords[v.id] = recs || [] }).catch(() => {})
+        ))
+        setRecords(allRecords)
+      })
       .catch(() => setLoading(false))
   }, [user.id])
 
@@ -427,23 +436,21 @@ function FleetApp({ session }) {
   const handlePhotoCapture = async (e, vehicleId, angle) => {
     const file = e.target.files[0]; if (!file) return
     const preview = URL.createObjectURL(file)
-    // Optimistic update with preview
+    // Optimistic preview
     setVehicles(p => p.map(v => v.id === vehicleId ? { ...v, photos: { ...(v.photos || {}), [angle]: preview } } : v))
     try {
+      // Upload file to storage
       const url = await uploadPhoto(user.id, vehicleId, angle, file)
-      // Get fresh vehicle photos from current state to avoid stale closure
-      setVehicles(prev => {
-        const freshVehicle = prev.find(v => v.id === vehicleId)
-        const newPhotos = { ...(freshVehicle?.photos || {}), [angle]: url }
-        updateVehicle(vehicleId, { photos: newPhotos })
-          .then(updated => setVehicles(p => p.map(v => v.id === updated.id ? updated : v)))
-          .catch(() => {})
-        return prev
-      })
+      // Fetch the LATEST vehicle data from DB to get all existing photos (avoids overwriting)
+      const { data: freshVehicle } = await supabase.from('vehicles').select('photos').eq('id', vehicleId).single()
+      const existingPhotos = freshVehicle?.photos || {}
+      const newPhotos = { ...existingPhotos, [angle]: url }
+      const updated = await updateVehicle(vehicleId, { photos: newPhotos })
+      setVehicles(p => p.map(v => v.id === updated.id ? updated : v))
       showToast("Foto salva ✓")
-    } catch (e) {
-      console.error(e)
-      showToast("Erro ao enviar foto: " + e.message)
+    } catch (err) {
+      console.error(err)
+      showToast("Erro ao enviar foto")
     }
   }
 
