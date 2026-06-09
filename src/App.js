@@ -573,66 +573,56 @@ function FleetApp({ session }) {
   )
 
   const DetailTab = () => {
-    // ALL hooks must come before any early return
+    // hooks first — no early returns before these
     const [carouselIdx, setCarouselIdx] = React.useState(0)
     const [fipeHistory, setFipeHistory] = React.useState([])
     const [fipeLoading, setFipeLoading] = React.useState(false)
 
-    const fipeCode  = activeVehicle?.fipe_code  || null
-    const fipePrice = activeVehicle?.fipe_price || null
-
-    if (!activeVehicle) return <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)" }}><div style={{ fontSize: 40, marginBottom: 12 }}>🚗</div><p>Selecione um veículo na aba Início</p></div>
+    const fipeCode  = activeVehicle ? activeVehicle.fipe_code  : null
+    const fipePrice = activeVehicle ? activeVehicle.fipe_price : null
 
     React.useEffect(() => {
-      if (!fipeCode || !fipePrice) return
-      // Parse current value as baseline
+      if (!fipeCode || !fipePrice) { setFipeHistory([]); return }
       const currentVal = parseFloat((fipePrice || "0").replace(/[^0-9,]/g, "").replace(",", ".")) || 0
       if (!currentVal) return
-
-      const months = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
-      const now = new Date()
-
-      // Build 6-month labels ending at current month
-      const labels = Array.from({ length: 6 }, (_, i) => {
-        const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1)
-        return months[d.getMonth()]
-      })
-
-      // Try to fetch real data from FIPE API for each month
-      // FIPE public API supports: /tabela (list of reference tables) + price by table
       setFipeLoading(true)
       fetch("https://parallelum.com.br/fipe/api/v1/carros/referencias")
         .then(r => r.json())
-        .then(async (refs) => {
-          // refs = [{ Codigo, Mes }, ...] newest first
-          const last6 = refs.slice(0, 6).reverse() // oldest to newest
-          const ti2 = getTypeInfo(activeVehicle.type)
-          const slug = ti2.fipeCode === 2 ? "motos" : ti2.fipeCode === 3 ? "caminhoes" : "carros"
-
-          // For each reference month, fetch price by fipe_code
-          // Note: parallelum API doesn't support historical by fipe_code directly,
-          // so we use current price + real reference month labels
-          // Real historical requires the official FIPE SOAP API (paid)
-          // We show real current value + honest trend based on Brazilian average depreciation
+        .then(refs => {
+          const last6 = refs.slice(0, 6).reverse()
           const history = last6.map((ref, i) => {
             const isLast = i === last6.length - 1
-            // Brazilian avg depreciation: ~1.5% / month for cars
             const monthsAgo = last6.length - 1 - i
-            const adjustedVal = isLast ? currentVal : Math.round(currentVal * Math.pow(1.015, monthsAgo))
-            return { label: ref.Mes.substring(0, 3), value: adjustedVal, isReal: isLast }
+            const val = isLast ? currentVal : Math.round(currentVal * Math.pow(1.015, monthsAgo))
+            return { label: ref.Mes.substring(0, 3), value: val, isReal: isLast }
           })
           setFipeHistory(history)
         })
         .catch(() => {
-          // Fallback: show only current value
-          const now2 = new Date()
-          setFipeHistory([{ label: months[now2.getMonth()], value: currentVal, isReal: true }])
+          const months = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
+          setFipeHistory([{ label: months[new Date().getMonth()], value: currentVal, isReal: true }])
         })
         .finally(() => setFipeLoading(false))
     }, [fipeCode, fipePrice])
 
+    // early return AFTER all hooks
+    if (!activeVehicle) return (
+      <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)" }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>🚗</div>
+        <p>Selecione um veículo na aba Início</p>
+      </div>
+    )
+
+    const ti           = getTypeInfo(activeVehicle.type)
+    const totalSpent   = activeRecords.reduce((s, r) => s + (r.cost || 0), 0)
+    const prog         = Math.min(((activeVehicle.km||0) / (activeVehicle.next_service||1)) * 100, 100)
+    const receiptsCount = activeRecords.filter(r => r.receipt_url).length
+    const photoSlides  = PHOTO_ANGLES.map(a => ({ key: a.key, label: a.label, url: activeVehicle.photos?.[a.key] || null }))
+    const filledSlides = photoSlides.filter(s => s.url)
+    const slides       = filledSlides.length > 0 ? filledSlides : [{ key: "empty", label: "", url: null }]
+
     const FipeChart = () => {
-      if (!activeVehicle.fipe_price) return null
+      if (!fipePrice) return null
       if (fipeLoading) return (
         <div className="fipe-chart-card">
           <div className="fipe-chart-title">📈 Evolução FIPE</div>
@@ -642,92 +632,72 @@ function FleetApp({ session }) {
         </div>
       )
       if (!fipeHistory.length) return null
-
       const vals = fipeHistory.map(h => h.value)
-      const min = Math.min(...vals) * 0.99
-      const max = Math.max(...vals) * 1.01
-      const W = 300; const H = 100
-      const LABEL_H = 30 // extra space above for value labels
-      const TOTAL_H = H + LABEL_H
-      const px = (i) => vals.length === 1 ? W/2 : (i / (vals.length - 1)) * W
-      const py = (v) => LABEL_H + (H - ((v - min) / (max - min || 1)) * H)
-
-      const areaPath = `M0,${TOTAL_H} ` + vals.map((v,i) => `L${px(i)},${py(v)}`).join(" ") + ` L${W},${TOTAL_H} Z`
+      const min  = Math.min(...vals) * 0.99
+      const max  = Math.max(...vals) * 1.01
+      const W = 300; const H = 100; const LH = 30; const TH = H + LH
+      const px = i => vals.length === 1 ? W / 2 : (i / (vals.length - 1)) * W
+      const py = v => LH + (H - ((v - min) / ((max - min) || 1)) * H)
+      const areaPath = `M0,${TH} ` + vals.map((v,i) => `L${px(i)},${py(v)}`).join(" ") + ` L${W},${TH} Z`
       const linePath = vals.map((v,i) => `${i===0?"M":"L"}${px(i)},${py(v)}`).join(" ")
-
-      const last = vals[vals.length-1]
-      const prev = vals.length > 1 ? vals[vals.length-2] : last
+      const last = vals[vals.length-1]; const prev = vals.length > 1 ? vals[vals.length-2] : last
       const diff = last - prev
-      // CORRECT COLORS: up = bad (losing money) = red; down = good (stable/saved) = depends on context
-      // For vehicle owner: UP = valorized (good = green), DOWN = depreciated (bad = red)
       const trend = last > prev * 1.002 ? "up" : last < prev * 0.998 ? "down" : "flat"
-      // up = valorized = GREEN (good for owner)
-      // down = depreciated = RED (losing value)
       const trendColor = trend === "up" ? "#c8f53a" : trend === "down" ? "#f5573a" : "#7a8a72"
-      const trendBg   = trend === "up" ? "rgba(200,245,58,0.12)" : trend === "down" ? "rgba(245,87,58,0.12)" : "rgba(122,138,114,0.12)"
+      const trendBg    = trend === "up" ? "rgba(200,245,58,0.12)" : trend === "down" ? "rgba(245,87,58,0.12)" : "rgba(122,138,114,0.12)"
       const trendLabel = trend === "up" ? "▲ Valorizou" : trend === "down" ? "▼ Desvalorizou" : "● Estável"
-      const lineColor = trend === "up" ? "#c8f53a" : trend === "down" ? "#f5573a" : "#7a8a72"
-      const gradColor = lineColor
-      const diffStr = (diff >= 0 ? "+" : "") + diff.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
-      const fmtVal = (v) => "R$ " + Math.round(v).toLocaleString("pt-BR")
-
+      const diffStr    = (diff >= 0 ? "+" : "") + diff.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+      const fmtVal     = v => "R$\u00a0" + Math.round(v).toLocaleString("pt-BR")
       return (
         <div className="fipe-chart-card">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
             <div className="fipe-chart-title" style={{ marginBottom: 0 }}>📈 Evolução FIPE</div>
             <span style={{ fontSize: 10, color: "var(--muted)", background: "var(--surface2)", padding: "2px 8px", borderRadius: 10 }}>
-              {fipeHistory.some(h => !h.isReal) ? "estimativa baseada em depreciação média" : "dados reais FIPE"}
+              {fipeHistory.some(h => !h.isReal) ? "estimativa" : "dados reais FIPE"}
             </span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, marginTop: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, marginTop: 8, flexWrap: "wrap" }}>
             <div className="fipe-current">
-              <span className="fc-val">{activeVehicle.fipe_price}</span>
+              <span className="fc-val">{fipePrice}</span>
               {activeVehicle.fipe_ref && <span className="fc-ref">{activeVehicle.fipe_ref}</span>}
             </div>
             <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 20, background: trendBg, color: trendColor, fontWeight: 600 }}>
               {trendLabel} {diffStr}
             </span>
           </div>
-          <svg viewBox={`0 0 ${W} ${TOTAL_H}`} className="fipe-chart-svg" style={{ height: TOTAL_H, overflow: "visible" }}>
+          <svg viewBox={`0 0 ${W} ${TH}`} className="fipe-chart-svg" style={{ height: TH, overflow: "visible" }}>
             <defs>
               <linearGradient id="fipeGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={gradColor} stopOpacity="0.3"/>
-                <stop offset="100%" stopColor={gradColor} stopOpacity="0"/>
+                <stop offset="0%" stopColor={trendColor} stopOpacity="0.3"/>
+                <stop offset="100%" stopColor={trendColor} stopOpacity="0"/>
               </linearGradient>
             </defs>
             <path d={areaPath} fill="url(#fipeGrad)"/>
-            <path d={linePath} fill="none" stroke={lineColor} strokeWidth="2" strokeLinejoin="round"/>
+            <path d={linePath} fill="none" stroke={trendColor} strokeWidth="2" strokeLinejoin="round"/>
             {vals.map((v, i) => {
-              const cx = px(i); const cy = py(v)
-              const isLast = i === vals.length - 1
-              const labelX = Math.max(20, Math.min(cx, W - 20))
-              const labelY = cy - 10
+              const cx = px(i); const cy = py(v); const isLast = i === vals.length - 1
               return (
                 <g key={i}>
-                  <circle cx={cx} cy={cy} r={isLast ? 4 : 3} fill={lineColor} opacity={isLast ? 1 : 0.7}/>
-                  {/* Value label on every point */}
-                  <text
-                    x={labelX} y={labelY}
-                    textAnchor="middle"
-                    fontSize="9"
-                    fill={isLast ? lineColor : "rgba(122,138,114,0.9)"}
-                    fontFamily="DM Sans, sans-serif"
-                    fontWeight={isLast ? "700" : "400"}
-                  >{fmtVal(v)}</text>
+                  <circle cx={cx} cy={cy} r={isLast ? 4 : 3} fill={trendColor} opacity={isLast ? 1 : 0.7}/>
+                  <text x={Math.max(20, Math.min(cx, W-20))} y={cy - 8} textAnchor="middle" fontSize="9"
+                    fill={isLast ? trendColor : "rgba(122,138,114,0.9)"}
+                    fontFamily="DM Sans, sans-serif" fontWeight={isLast ? "700" : "400"}>
+                    {fmtVal(v)}
+                  </text>
                 </g>
               )
             })}
           </svg>
           <div className="fipe-chart-labels">
             {fipeHistory.map((h, i) => (
-              <span key={i} style={{ color: i === fipeHistory.length - 1 ? lineColor : undefined, fontWeight: i === fipeHistory.length - 1 ? 600 : undefined }}>
+              <span key={i} style={{ color: i === fipeHistory.length-1 ? trendColor : undefined, fontWeight: i === fipeHistory.length-1 ? 600 : undefined }}>
                 {h.label}
               </span>
             ))}
           </div>
           {fipeHistory.some(h => !h.isReal) && (
             <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 8, lineHeight: 1.4 }}>
-              ⚠️ Histórico estimado com base na depreciação média brasileira (~1,5%/mês). O valor atual é real da tabela FIPE.
+              ⚠️ Histórico estimado (~1,5%/mês depreciação média). Valor atual é real da FIPE.
             </div>
           )}
         </div>
@@ -739,7 +709,7 @@ function FleetApp({ session }) {
         {/* PHOTO CAROUSEL */}
         <div className="carousel-wrap">
           <div className="carousel-track" style={{ transform: `translateX(-${carouselIdx * 100}%)` }}>
-            {slides.map((s, i) => (
+            {slides.map(s => (
               <div className="carousel-slide" key={s.key}>
                 {s.url
                   ? <img src={s.url} alt={s.label} />
@@ -748,95 +718,118 @@ function FleetApp({ session }) {
               </div>
             ))}
           </div>
-          {/* Back button overlaid on carousel */}
           <button className="carousel-back" onClick={() => { setSelectedId(null); setTab("home") }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
             Voltar
           </button>
           {activeVehicle.plate && <span className="carousel-plate">{activeVehicle.plate}</span>}
-          {/* Overlay info */}
           <div className="carousel-info">
             <div className="ci-name">{activeVehicle.name}</div>
             <div className="ci-sub"><span>🗓 {activeVehicle.year}</span><span>⛽ {activeVehicle.fuel}</span><span>🎨 {activeVehicle.color}</span></div>
           </div>
-          {/* Dots */}
           {slides.length > 1 && (
             <div className="carousel-dots">
               {slides.map((_, i) => <div key={i} className={`carousel-dot ${i === carouselIdx ? "active" : ""}`} onClick={() => setCarouselIdx(i)} />)}
             </div>
           )}
-          {/* Nav arrows */}
-          {slides.length > 1 && carouselIdx > 0 && <button className="carousel-nav prev" onClick={() => setCarouselIdx(i => i - 1)}>‹</button>}
-          {slides.length > 1 && carouselIdx < slides.length - 1 && <button className="carousel-nav next" onClick={() => setCarouselIdx(i => i + 1)}>›</button>}
+          {slides.length > 1 && carouselIdx > 0 && <button className="carousel-nav prev" onClick={() => setCarouselIdx(p => p - 1)}>‹</button>}
+          {slides.length > 1 && carouselIdx < slides.length - 1 && <button className="carousel-nav next" onClick={() => setCarouselIdx(p => p + 1)}>›</button>}
         </div>
 
         <div style={{ padding: "0 20px" }}>
-          {/* Tags */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap", marginTop: 16 }}>
             <span className="tag tag-green">{ti.label}</span>
             <span className="tag tag-green">{activeVehicle.plate}</span>
             <span className="tag tag-green">{activeVehicle.year}</span>
             {activeVehicle.fipe_code && <span className="tag tag-green">FIPE {activeVehicle.fipe_code}</span>}
           </div>
-          {/* FIPE Chart */}
+
           <FipeChart />
 
           <div className="detail-km-bar">
-          <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Quilometragem</div>
-          <div className="km-display">{(activeVehicle.km||0).toLocaleString("pt-BR")} <span>km</span></div>
-          <div className="km-progress" style={{ marginTop: 8 }}><div className="km-progress-fill" style={{ width: `${prog}%` }} /></div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>Próx. revisão: {(activeVehicle.next_service||0).toLocaleString("pt-BR")} km</span>
-            <button onClick={() => setModal("km")} style={{ background: "none", border: "none", color: "var(--accent)", fontSize: 12, cursor: "pointer", fontFamily: "DM Sans, sans-serif" }}>Atualizar</button>
+            <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Quilometragem</div>
+            <div className="km-display">{(activeVehicle.km||0).toLocaleString("pt-BR")} <span>km</span></div>
+            <div className="km-progress" style={{ marginTop: 8 }}><div className="km-progress-fill" style={{ width: `${prog}%` }} /></div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>Próx. revisão: {(activeVehicle.next_service||0).toLocaleString("pt-BR")} km</span>
+              <button onClick={() => setModal("km")} style={{ background: "none", border: "none", color: "var(--accent)", fontSize: 12, cursor: "pointer", fontFamily: "DM Sans, sans-serif" }}>Atualizar</button>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+            {[
+              { label: "Total gasto", val: `R$\u00a0${totalSpent.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` },
+              { label: "Registros",   val: activeRecords.length },
+              { label: "NFs",         val: receiptsCount },
+            ].map(s => (
+              <div key={s.label} className="detail-km-bar" style={{ marginBottom: 0, padding: "12px 14px" }}>
+                <div style={{ color: "var(--muted)", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 }}>{s.label}</div>
+                <div style={{ fontFamily: "DM Serif Display, serif", fontSize: 18, lineHeight: 1.2 }}>{s.val}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="quick-actions">
+            {[
+              { type: "oil",         icon: "🛢️", label: "Óleo",      sub: "Troca de óleo"    },
+              { type: "maintenance", icon: "⚙️", label: "Revisão",   sub: "Manutenção geral"  },
+              { type: "tire",        icon: "🔧", label: "Pneu/Roda", sub: "Alinhamento, etc"  },
+              { type: "fuel",        icon: "⛽", label: "Abastec.",  sub: "Combustível"        },
+            ].map(a => (
+              <button key={a.type} className="quick-btn"
+                onClick={() => { setFormData({}); setEditRecord(null); setReceiptFile(null); setReceiptPreview(null); setRecordType(a.type); setModal("addRecord") }}>
+                <span className="qb-icon">{a.icon}</span>
+                <span className="qb-label">{a.label}</span>
+                <span className="qb-sub">{a.sub}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="transfer-card">
+            <div style={{ fontSize: 28, marginBottom: 8 }}>📋</div>
+            <div style={{ fontFamily: "DM Serif Display, serif", fontSize: 18, marginBottom: 6 }}>Documento do Veículo</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>Transfira o histórico completo para o novo dono. Ele recebe um link e ao criar conta, tudo aparece automaticamente.</div>
+            <button className="transfer-btn" onClick={() => { setFormData({}); setModal("transfer") }}>Transferir histórico</button>
+          </div>
+
+          <div className="section-header" style={{ marginTop: 8 }}>
+            <span className="section-title">Histórico</span>
+            <span className="section-action" onClick={() => { setFormData({}); setEditRecord(null); setReceiptFile(null); setReceiptPreview(null); setModal("addRecord") }}>+ Novo</span>
+          </div>
+
+          <div className="timeline">
+            {activeRecords.map(rec => {
+              const tc = TYPE_CONFIG[rec.type] || TYPE_CONFIG.other
+              return (
+                <div className="timeline-item" key={rec.id} onClick={() => setViewRecord(rec)}>
+                  <div className={`timeline-dot ${tc.cls}`}>{tc.emoji}</div>
+                  <div className="timeline-content">
+                    <div className="timeline-title">{rec.title}</div>
+                    <div className="timeline-meta">
+                      <span>{rec.date}</span><span>•</span><span>{(rec.km||0).toLocaleString("pt-BR")} km</span>
+                      {rec.parts && <><span>•</span><span style={{ color: "var(--accent)", fontSize: 10 }}>🔩 peças</span></>}
+                    </div>
+                    {rec.receipt_url && <div className="receipt-indicator">🧾 Nota fiscal</div>}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                    {rec.cost > 0 && <div className="timeline-cost">R${(rec.cost).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>}
+                    {rec.receipt_url && <img src={rec.receipt_url} alt="NF" className="receipt-thumb" />}
+                    <button
+                      onClick={e => { e.stopPropagation(); setEditRecord(rec); setRecordType(rec.type); setFormData({ title: rec.title, date: rec.date, km: rec.km, cost: rec.cost, notes: rec.notes, parts: rec.parts }); setReceiptPreview(rec.receipt_url || null); setReceiptFile(null); setModal("addRecord") }}
+                      style={{ background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "3px 8px", fontSize: 10, color: "var(--muted)", cursor: "pointer", marginTop: 2 }}>
+                      ✏️ editar
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+            {activeRecords.length === 0 && (
+              <div style={{ textAlign: "center", padding: "24px", color: "var(--muted)", fontSize: 13 }}>
+                Nenhum registro ainda.<br/>Adicione sua primeira manutenção.
+              </div>
+            )}
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-          {[{ label: "Total gasto", val: `R$\u00a0${totalSpent.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` }, { label: "Registros", val: activeRecords.length }, { label: "NFs", val: receiptsCount }].map(s => (
-            <div key={s.label} className="detail-km-bar" style={{ marginBottom: 0, padding: "12px 14px" }}>
-              <div style={{ color: "var(--muted)", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 }}>{s.label}</div>
-              <div style={{ fontFamily: "DM Serif Display, serif", fontSize: 18, lineHeight: 1.2 }}>{s.val}</div>
-            </div>
-          ))}
-        </div>
-        <div className="quick-actions">
-          {[{ type: "oil", icon: "🛢️", label: "Óleo", sub: "Troca de óleo" }, { type: "maintenance", icon: "⚙️", label: "Revisão", sub: "Manutenção geral" }, { type: "tire", icon: "🔧", label: "Pneu/Roda", sub: "Alinhamento, etc" }, { type: "fuel", icon: "⛽", label: "Abastec.", sub: "Combustível" }].map(a => (
-            <button key={a.type} className="quick-btn" onClick={() => { setFormData({}); setEditRecord(null); setReceiptFile(null); setReceiptPreview(null); setRecordType(a.type); setModal("addRecord") }}>
-              <span className="qb-icon">{a.icon}</span><span className="qb-label">{a.label}</span><span className="qb-sub">{a.sub}</span>
-            </button>
-          ))}
-        </div>
-        <div className="transfer-card">
-          <div style={{ fontSize: 28, marginBottom: 8 }}>📋</div>
-          <div style={{ fontFamily: "DM Serif Display, serif", fontSize: 18, marginBottom: 6 }}>Documento do Veículo</div>
-          <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>Transfira o histórico completo para o novo dono. Ele recebe um link e ao criar conta, tudo aparece automaticamente.</div>
-          <button className="transfer-btn" onClick={() => { setFormData({}); setModal("transfer") }}>Transferir histórico</button>
-        </div>
-        <div className="section-header" style={{ marginTop: 8 }}>
-          <span className="section-title">Histórico</span>
-          <span className="section-action" onClick={() => { setFormData({}); setEditRecord(null); setReceiptFile(null); setReceiptPreview(null); setModal("addRecord") }}>+ Novo</span>
-        </div>
-        <div className="timeline">
-          {activeRecords.map(rec => {
-            const tc = TYPE_CONFIG[rec.type] || TYPE_CONFIG.other
-            return (
-              <div className="timeline-item" key={rec.id} onClick={() => setViewRecord(rec)}>
-                <div className={`timeline-dot ${tc.cls}`}>{tc.emoji}</div>
-                <div className="timeline-content">
-                  <div className="timeline-title">{rec.title}</div>
-                  <div className="timeline-meta"><span>{rec.date}</span><span>•</span><span>{(rec.km||0).toLocaleString("pt-BR")} km</span>{rec.parts && <><span>•</span><span style={{ color: "var(--accent)", fontSize: 10 }}>🔩 peças</span></>}</div>
-                  {rec.receipt_url && <div className="receipt-indicator">🧾 Nota fiscal</div>}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                  {rec.cost > 0 && <div className="timeline-cost">R${(rec.cost).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>}
-                  {rec.receipt_url && <img src={rec.receipt_url} alt="NF" className="receipt-thumb" />}
-                  <button onClick={e => { e.stopPropagation(); setEditRecord(rec); setRecordType(rec.type); setFormData({ title: rec.title, date: rec.date, km: rec.km, cost: rec.cost, notes: rec.notes, parts: rec.parts }); setReceiptPreview(rec.receipt_url || null); setReceiptFile(null); setModal("addRecord") }} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "3px 8px", fontSize: 10, color: "var(--muted)", cursor: "pointer", marginTop: 2 }}>✏️ editar</button>
-                </div>
-              </div>
-            )
-          })}
-          {activeRecords.length === 0 && <div style={{ textAlign: "center", padding: "24px", color: "var(--muted)", fontSize: 13 }}>Nenhum registro ainda.<br/>Adicione sua primeira manutenção.</div>}
-        </div>
-        </div>{/* end padding */}
       </div>
     )
   }
