@@ -573,26 +573,20 @@ function FleetApp({ session }) {
   )
 
   const DetailTab = () => {
+    // ALL hooks must come before any early return
     const [carouselIdx, setCarouselIdx] = React.useState(0)
-    if (!activeVehicle) return <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)" }}><div style={{ fontSize: 40, marginBottom: 12 }}>🚗</div><p>Selecione um veículo na aba Início</p></div>
-    const ti = getTypeInfo(activeVehicle.type)
-    const totalSpent = activeRecords.reduce((s, r) => s + (r.cost || 0), 0)
-    const prog = Math.min(((activeVehicle.km||0) / (activeVehicle.next_service||1)) * 100, 100)
-    const receiptsCount = activeRecords.filter(r => r.receipt_url).length
-
-    // Build slides from vehicle photos
-    const photoSlides = PHOTO_ANGLES.map(a => ({ key: a.key, label: a.label, url: activeVehicle.photos?.[a.key] || null }))
-    const filledSlides = photoSlides.filter(s => s.url)
-    const slides = filledSlides.length > 0 ? filledSlides : [{ key: "empty", label: "", url: null }]
-
-    // FIPE real history — fetch last 6 months from API using the vehicle's fipe_code
     const [fipeHistory, setFipeHistory] = React.useState([])
     const [fipeLoading, setFipeLoading] = React.useState(false)
 
+    const fipeCode  = activeVehicle?.fipe_code  || null
+    const fipePrice = activeVehicle?.fipe_price || null
+
+    if (!activeVehicle) return <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)" }}><div style={{ fontSize: 40, marginBottom: 12 }}>🚗</div><p>Selecione um veículo na aba Início</p></div>
+
     React.useEffect(() => {
-      if (!activeVehicle.fipe_code || !activeVehicle.fipe_price) return
+      if (!fipeCode || !fipePrice) return
       // Parse current value as baseline
-      const currentVal = parseFloat((activeVehicle.fipe_price || "0").replace(/[^0-9,]/g, "").replace(",", ".")) || 0
+      const currentVal = parseFloat((fipePrice || "0").replace(/[^0-9,]/g, "").replace(",", ".")) || 0
       if (!currentVal) return
 
       const months = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
@@ -635,7 +629,7 @@ function FleetApp({ session }) {
           setFipeHistory([{ label: months[now2.getMonth()], value: currentVal, isReal: true }])
         })
         .finally(() => setFipeLoading(false))
-    }, [activeVehicle.fipe_code, activeVehicle.fipe_price])
+    }, [fipeCode, fipePrice])
 
     const FipeChart = () => {
       if (!activeVehicle.fipe_price) return null
