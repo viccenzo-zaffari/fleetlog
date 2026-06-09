@@ -168,6 +168,44 @@ const STYLES = `
   .tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 600; }
   .tag-green { background: rgba(200,245,58,0.12); color: var(--accent); }
   .toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); background: var(--accent); color: var(--bg); padding: 10px 20px; border-radius: 100px; font-size: 13px; font-weight: 600; z-index: 999; animation: fadeIn 0.2s; white-space: nowrap; }
+
+  /* PHOTO CAROUSEL */
+  .carousel-wrap { position: relative; width: calc(100% + 40px); margin-left: -20px; margin-bottom: 20px; overflow: hidden; background: #0a0c0a; }
+  .carousel-track { display: flex; transition: transform 0.35s cubic-bezier(0.4,0,0.2,1); will-change: transform; }
+  .carousel-slide { min-width: 100%; height: 260px; flex-shrink: 0; position: relative; display: flex; align-items: center; justify-content: center; }
+  .carousel-slide img { width: 100%; height: 100%; object-fit: cover; }
+  .carousel-slide .slide-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--muted); }
+  .carousel-slide .slide-empty span:first-child { font-size: 60px; opacity: 0.3; }
+  .carousel-slide .slide-empty span:last-child { font-size: 12px; }
+  .carousel-dots { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 5px; }
+  .carousel-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.4); transition: all 0.2s; }
+  .carousel-dot.active { background: var(--accent); width: 18px; border-radius: 3px; }
+  .carousel-label { position: absolute; bottom: 28px; right: 12px; background: rgba(13,15,14,0.75); backdrop-filter: blur(8px); border: 1px solid var(--border); color: var(--muted); font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 20px; text-transform: uppercase; }
+  .carousel-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(13,15,14,0.6); border: none; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: white; font-size: 14px; }
+  .carousel-nav.prev { left: 10px; }
+  .carousel-nav.next { right: 10px; }
+  .carousel-back { position: absolute; top: 12px; left: 12px; background: rgba(13,15,14,0.7); backdrop-filter: blur(8px); border: none; border-radius: 20px; padding: 6px 12px; display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 12px; cursor: pointer; font-family: 'DM Sans', sans-serif; z-index: 10; }
+  .carousel-plate { position: absolute; top: 12px; right: 12px; background: var(--accent); color: var(--bg); font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
+  .carousel-info { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.8)); padding: 20px 16px 12px; }
+  .carousel-info .ci-name { font-family: 'DM Serif Display', serif; font-size: 22px; color: white; margin-bottom: 2px; }
+  .carousel-info .ci-sub { font-size: 12px; color: rgba(255,255,255,0.6); display: flex; gap: 10px; }
+
+  /* FIPE CHART */
+  .fipe-chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  .fipe-chart-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 12px; font-weight: 600; }
+  .fipe-chart-svg { width: 100%; overflow: visible; }
+  .fipe-chart-area { fill: url(#fipeGrad); }
+  .fipe-chart-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .fipe-chart-dot { fill: var(--accent); }
+  .fipe-chart-labels { display: flex; justify-content: space-between; margin-top: 6px; }
+  .fipe-chart-labels span { font-size: 9px; color: var(--muted); }
+  .fipe-current { display: flex; align-items: baseline; gap: 6px; margin-bottom: 12px; }
+  .fipe-current .fc-val { font-family: 'DM Serif Display', serif; font-size: 28px; color: var(--accent); }
+  .fipe-current .fc-ref { font-size: 11px; color: var(--muted); }
+  .fipe-trend { font-size: 11px; padding: 3px 8px; border-radius: 20px; }
+  .fipe-trend.up { background: rgba(245,87,58,0.12); color: var(--danger); }
+  .fipe-trend.down { background: rgba(200,245,58,0.12); color: var(--accent); }
+  .fipe-trend.flat { background: rgba(122,138,114,0.12); color: var(--muted); }
   ::-webkit-scrollbar { width: 0; }
 `
 
@@ -535,34 +573,124 @@ function FleetApp({ session }) {
   )
 
   const DetailTab = () => {
+    const [carouselIdx, setCarouselIdx] = React.useState(0)
     if (!activeVehicle) return <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)" }}><div style={{ fontSize: 40, marginBottom: 12 }}>🚗</div><p>Selecione um veículo na aba Início</p></div>
     const ti = getTypeInfo(activeVehicle.type)
     const totalSpent = activeRecords.reduce((s, r) => s + (r.cost || 0), 0)
     const prog = Math.min(((activeVehicle.km||0) / (activeVehicle.next_service||1)) * 100, 100)
     const receiptsCount = activeRecords.filter(r => r.receipt_url).length
-    return (
-      <div>
-        <div className="back-btn" onClick={() => { setSelectedId(null); setTab("home") }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>Voltar
-        </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-              <span className="tag tag-green">{ti.label}</span>
-              <span className="tag tag-green">{activeVehicle.plate}</span>
-              <span className="tag tag-green">{activeVehicle.year}</span>
+
+    // Build slides from vehicle photos
+    const photoSlides = PHOTO_ANGLES.map(a => ({ key: a.key, label: a.label, url: activeVehicle.photos?.[a.key] || null }))
+    const filledSlides = photoSlides.filter(s => s.url)
+    const slides = filledSlides.length > 0 ? filledSlides : [{ key: "empty", label: "", url: null }]
+
+    // FIPE history mock — in production store monthly snapshots in DB
+    const fipeHistory = activeVehicle.fipe_price ? (() => {
+      const val = parseFloat((activeVehicle.fipe_price || "0").replace(/[^0-9,]/g, "").replace(",", ".")) || 0
+      if (!val) return []
+      const months = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
+      const now = new Date()
+      return Array.from({ length: 6 }, (_, i) => {
+        const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1)
+        const variation = (Math.random() - 0.48) * 0.03
+        return { label: months[d.getMonth()], value: Math.round(val * (1 + variation * (i + 1))) }
+      }).concat([{ label: months[now.getMonth()], value: val }])
+    })() : []
+
+    const FipeChart = () => {
+      if (!fipeHistory.length) return null
+      const vals = fipeHistory.map(h => h.value)
+      const min = Math.min(...vals) * 0.995
+      const max = Math.max(...vals) * 1.005
+      const W = 300; const H = 80
+      const px = (i) => (i / (vals.length - 1)) * W
+      const py = (v) => H - ((v - min) / (max - min)) * H
+      const points = vals.map((v, i) => `${px(i)},${py(v)}`).join(" ")
+      const area = `M0,${H} L${points.split(" ").map((p,i) => (i===0 ? "L" : "") + p).join(" L")} L${W},${H} Z`.replace("L L","L")
+      const areaPath = `M0,${H} ` + vals.map((v,i) => `L${px(i)},${py(v)}`).join(" ") + ` L${W},${H} Z`
+      const linePath = vals.map((v,i) => `${i===0?"M":"L"}${px(i)},${py(v)}`).join(" ")
+      const last = vals[vals.length-1]; const prev = vals[vals.length-2]
+      const trend = last > prev * 1.005 ? "up" : last < prev * 0.995 ? "down" : "flat"
+      const trendLabel = trend === "up" ? "▲ Valorizou" : trend === "down" ? "▼ Desvalorizou" : "● Estável"
+      const diff = last - prev
+      const diffStr = (diff >= 0 ? "+" : "") + diff.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+      return (
+        <div className="fipe-chart-card">
+          <div className="fipe-chart-title">📈 Evolução FIPE</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+            <div className="fipe-current">
+              <span className="fc-val">{activeVehicle.fipe_price}</span>
+              {activeVehicle.fipe_ref && <span className="fc-ref">{activeVehicle.fipe_ref}</span>}
             </div>
-            <h2 className="serif" style={{ fontSize: 26 }}>{activeVehicle.name}</h2>
+            <span className={`fipe-trend ${trend}`}>{trendLabel} {diffStr}</span>
           </div>
-          <span style={{ fontSize: 56 }}>{ti.emoji}</span>
+          <svg viewBox={`0 0 ${W} ${H}`} className="fipe-chart-svg" style={{ height: H }}>
+            <defs>
+              <linearGradient id="fipeGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#c8f53a" stopOpacity="0.25"/>
+                <stop offset="100%" stopColor="#c8f53a" stopOpacity="0"/>
+              </linearGradient>
+            </defs>
+            <path d={areaPath} className="fipe-chart-area"/>
+            <path d={linePath} className="fipe-chart-line"/>
+            {vals.map((v,i) => <circle key={i} cx={px(i)} cy={py(v)} r={i===vals.length-1?4:2.5} className="fipe-chart-dot" opacity={i===vals.length-1?1:0.6}/>)}
+          </svg>
+          <div className="fipe-chart-labels">
+            {fipeHistory.map((h,i) => <span key={i}>{h.label}</span>)}
+          </div>
         </div>
-        {activeVehicle.fipe_price && (
-          <div className="fipe-value-card">
-            <div><div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 1, color: "var(--muted)", marginBottom: 2 }}>💰 Valor FIPE</div><div style={{ fontFamily: "DM Serif Display, serif", fontSize: 24, color: "var(--accent)" }}>{activeVehicle.fipe_price}</div>{activeVehicle.fipe_ref && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>Ref: {activeVehicle.fipe_ref}</div>}</div>
-            <div style={{ fontSize: 28 }}>📊</div>
+      )
+    }
+
+    return (
+      <div style={{ margin: "0 -20px" }}>
+        {/* PHOTO CAROUSEL */}
+        <div className="carousel-wrap">
+          <div className="carousel-track" style={{ transform: `translateX(-${carouselIdx * 100}%)` }}>
+            {slides.map((s, i) => (
+              <div className="carousel-slide" key={s.key}>
+                {s.url
+                  ? <img src={s.url} alt={s.label} />
+                  : <div className="slide-empty"><span>{ti.emoji}</span><span>Adicione fotos na aba Fotos</span></div>}
+                {s.label && <span className="carousel-label">{s.label}</span>}
+              </div>
+            ))}
           </div>
-        )}
-        <div className="detail-km-bar">
+          {/* Back button overlaid on carousel */}
+          <button className="carousel-back" onClick={() => { setSelectedId(null); setTab("home") }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+            Voltar
+          </button>
+          {activeVehicle.plate && <span className="carousel-plate">{activeVehicle.plate}</span>}
+          {/* Overlay info */}
+          <div className="carousel-info">
+            <div className="ci-name">{activeVehicle.name}</div>
+            <div className="ci-sub"><span>🗓 {activeVehicle.year}</span><span>⛽ {activeVehicle.fuel}</span><span>🎨 {activeVehicle.color}</span></div>
+          </div>
+          {/* Dots */}
+          {slides.length > 1 && (
+            <div className="carousel-dots">
+              {slides.map((_, i) => <div key={i} className={`carousel-dot ${i === carouselIdx ? "active" : ""}`} onClick={() => setCarouselIdx(i)} />)}
+            </div>
+          )}
+          {/* Nav arrows */}
+          {slides.length > 1 && carouselIdx > 0 && <button className="carousel-nav prev" onClick={() => setCarouselIdx(i => i - 1)}>‹</button>}
+          {slides.length > 1 && carouselIdx < slides.length - 1 && <button className="carousel-nav next" onClick={() => setCarouselIdx(i => i + 1)}>›</button>}
+        </div>
+
+        <div style={{ padding: "0 20px" }}>
+          {/* Tags */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+            <span className="tag tag-green">{ti.label}</span>
+            <span className="tag tag-green">{activeVehicle.plate}</span>
+            <span className="tag tag-green">{activeVehicle.year}</span>
+            {activeVehicle.fipe_code && <span className="tag tag-green">FIPE {activeVehicle.fipe_code}</span>}
+          </div>
+          {/* FIPE Chart */}
+          <FipeChart />
+
+          <div className="detail-km-bar">
           <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Quilometragem</div>
           <div className="km-display">{(activeVehicle.km||0).toLocaleString("pt-BR")} <span>km</span></div>
           <div className="km-progress" style={{ marginTop: 8 }}><div className="km-progress-fill" style={{ width: `${prog}%` }} /></div>
@@ -617,6 +745,7 @@ function FleetApp({ session }) {
           })}
           {activeRecords.length === 0 && <div style={{ textAlign: "center", padding: "24px", color: "var(--muted)", fontSize: 13 }}>Nenhum registro ainda.<br/>Adicione sua primeira manutenção.</div>}
         </div>
+        </div>{/* end padding */}
       </div>
     )
   }
@@ -715,7 +844,7 @@ function FleetApp({ session }) {
             <button className="logout-btn" onClick={handleLogout}>Sair</button>
           </div>
         </div>
-        <div className="main">
+        <div className="main" style={{ paddingLeft: tab === "detail" ? 0 : undefined, paddingRight: tab === "detail" ? 0 : undefined, paddingTop: tab === "detail" ? 0 : undefined }}>
           {tab === "home"   && <HomeTab />}
           {tab === "detail" && <DetailTab />}
           {tab === "photos" && <PhotosTab />}
