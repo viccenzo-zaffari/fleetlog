@@ -575,35 +575,6 @@ function FleetApp({ session }) {
   const DetailTab = () => {
     // hooks first — no early returns before these
     const [carouselIdx, setCarouselIdx] = React.useState(0)
-    const [fipeHistory, setFipeHistory] = React.useState([])
-    const [fipeLoading, setFipeLoading] = React.useState(false)
-
-    const fipeCode  = activeVehicle ? activeVehicle.fipe_code  : null
-    const fipePrice = activeVehicle ? activeVehicle.fipe_price : null
-
-    React.useEffect(() => {
-      if (!fipeCode || !fipePrice) { setFipeHistory([]); return }
-      const currentVal = parseFloat((fipePrice || "0").replace(/[^0-9,]/g, "").replace(",", ".")) || 0
-      if (!currentVal) return
-      setFipeLoading(true)
-      fetch("https://parallelum.com.br/fipe/api/v1/carros/referencias")
-        .then(r => r.json())
-        .then(refs => {
-          const last6 = refs.slice(0, 6).reverse()
-          const history = last6.map((ref, i) => {
-            const isLast = i === last6.length - 1
-            const monthsAgo = last6.length - 1 - i
-            const val = isLast ? currentVal : Math.round(currentVal * Math.pow(1.015, monthsAgo))
-            return { label: ref.Mes.substring(0, 3), value: val, isReal: isLast }
-          })
-          setFipeHistory(history)
-        })
-        .catch(() => {
-          const months = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
-          setFipeHistory([{ label: months[new Date().getMonth()], value: currentVal, isReal: true }])
-        })
-        .finally(() => setFipeLoading(false))
-    }, [fipeCode, fipePrice])
 
     // early return AFTER all hooks
     if (!activeVehicle) return (
@@ -620,89 +591,6 @@ function FleetApp({ session }) {
     const photoSlides  = PHOTO_ANGLES.map(a => ({ key: a.key, label: a.label, url: activeVehicle.photos?.[a.key] || null }))
     const filledSlides = photoSlides.filter(s => s.url)
     const slides       = filledSlides.length > 0 ? filledSlides : [{ key: "empty", label: "", url: null }]
-
-    const FipeChart = () => {
-      if (!fipePrice) return null
-      if (fipeLoading) return (
-        <div className="fipe-chart-card">
-          <div className="fipe-chart-title">📈 Evolução FIPE</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 0", color: "var(--muted)", fontSize: 13 }}>
-            <span className="spin">⟳</span> Buscando dados FIPE…
-          </div>
-        </div>
-      )
-      if (!fipeHistory.length) return null
-      const vals = fipeHistory.map(h => h.value)
-      const min  = Math.min(...vals) * 0.99
-      const max  = Math.max(...vals) * 1.01
-      const W = 300; const H = 100; const LH = 30; const TH = H + LH
-      const px = i => vals.length === 1 ? W / 2 : (i / (vals.length - 1)) * W
-      const py = v => LH + (H - ((v - min) / ((max - min) || 1)) * H)
-      const areaPath = `M0,${TH} ` + vals.map((v,i) => `L${px(i)},${py(v)}`).join(" ") + ` L${W},${TH} Z`
-      const linePath = vals.map((v,i) => `${i===0?"M":"L"}${px(i)},${py(v)}`).join(" ")
-      const last = vals[vals.length-1]; const prev = vals.length > 1 ? vals[vals.length-2] : last
-      const diff = last - prev
-      const trend = last > prev * 1.002 ? "up" : last < prev * 0.998 ? "down" : "flat"
-      const trendColor = trend === "up" ? "#c8f53a" : trend === "down" ? "#f5573a" : "#7a8a72"
-      const trendBg    = trend === "up" ? "rgba(200,245,58,0.12)" : trend === "down" ? "rgba(245,87,58,0.12)" : "rgba(122,138,114,0.12)"
-      const trendLabel = trend === "up" ? "▲ Valorizou" : trend === "down" ? "▼ Desvalorizou" : "● Estável"
-      const diffStr    = (diff >= 0 ? "+" : "") + diff.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
-      const fmtVal     = v => "R$\u00a0" + Math.round(v).toLocaleString("pt-BR")
-      return (
-        <div className="fipe-chart-card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-            <div className="fipe-chart-title" style={{ marginBottom: 0 }}>📈 Evolução FIPE</div>
-            <span style={{ fontSize: 10, color: "var(--muted)", background: "var(--surface2)", padding: "2px 8px", borderRadius: 10 }}>
-              {fipeHistory.some(h => !h.isReal) ? "estimativa" : "dados reais FIPE"}
-            </span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, marginTop: 8, flexWrap: "wrap" }}>
-            <div className="fipe-current">
-              <span className="fc-val">{fipePrice}</span>
-              {activeVehicle.fipe_ref && <span className="fc-ref">{activeVehicle.fipe_ref}</span>}
-            </div>
-            <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 20, background: trendBg, color: trendColor, fontWeight: 600 }}>
-              {trendLabel} {diffStr}
-            </span>
-          </div>
-          <svg viewBox={`0 0 ${W} ${TH}`} className="fipe-chart-svg" style={{ height: TH, overflow: "visible" }}>
-            <defs>
-              <linearGradient id="fipeGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={trendColor} stopOpacity="0.3"/>
-                <stop offset="100%" stopColor={trendColor} stopOpacity="0"/>
-              </linearGradient>
-            </defs>
-            <path d={areaPath} fill="url(#fipeGrad)"/>
-            <path d={linePath} fill="none" stroke={trendColor} strokeWidth="2" strokeLinejoin="round"/>
-            {vals.map((v, i) => {
-              const cx = px(i); const cy = py(v); const isLast = i === vals.length - 1
-              return (
-                <g key={i}>
-                  <circle cx={cx} cy={cy} r={isLast ? 4 : 3} fill={trendColor} opacity={isLast ? 1 : 0.7}/>
-                  <text x={Math.max(20, Math.min(cx, W-20))} y={cy - 8} textAnchor="middle" fontSize="9"
-                    fill={isLast ? trendColor : "rgba(122,138,114,0.9)"}
-                    fontFamily="DM Sans, sans-serif" fontWeight={isLast ? "700" : "400"}>
-                    {fmtVal(v)}
-                  </text>
-                </g>
-              )
-            })}
-          </svg>
-          <div className="fipe-chart-labels">
-            {fipeHistory.map((h, i) => (
-              <span key={i} style={{ color: i === fipeHistory.length-1 ? trendColor : undefined, fontWeight: i === fipeHistory.length-1 ? 600 : undefined }}>
-                {h.label}
-              </span>
-            ))}
-          </div>
-          {fipeHistory.some(h => !h.isReal) && (
-            <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 8, lineHeight: 1.4 }}>
-              ⚠️ Histórico estimado (~1,5%/mês depreciação média). Valor atual é real da FIPE.
-            </div>
-          )}
-        </div>
-      )
-    }
 
     return (
       <div style={{ margin: "0 -20px" }}>
@@ -744,7 +632,6 @@ function FleetApp({ session }) {
             {activeVehicle.fipe_code && <span className="tag tag-green">FIPE {activeVehicle.fipe_code}</span>}
           </div>
 
-          <FipeChart />
 
           <div className="detail-km-bar">
             <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Quilometragem</div>
